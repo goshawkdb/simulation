@@ -538,7 +538,7 @@ func (te *Matthew7TxnEngine) NewEngineVar(vi *par.VarInstance, vvv *p.VarVersion
 	return engineVar
 }
 
-func (te *Matthew7TxnEngine) NeedsCompletionNodes() bool { return true }
+func (te *Matthew7TxnEngine) NeedsCompletionNodes() bool { return false }
 
 // Matthew7TxnEngineVar
 type Matthew7TxnEngineVar struct {
@@ -817,31 +817,33 @@ func NewM7Frame(vs *M7VarState, txn *M7Txn, vv M7VersionVector) *M7Frame {
 	return f
 }
 
-func (a *M7Frame) LessThanFrame(b *M7Frame) bool {
-	v := a.varState.Var
-	switch {
-	case b == nil:
-		return false
-	case a == nil:
-		return true
-	case v != b.varState.Var:
-		return false
-	case a.readVoteVersion[v] < b.readVoteVersion[v]:
-		return true
-	case a.readVoteVersion[v] > b.readVoteVersion[v]:
-		return false
-	default:
-		return a.frameTxn.ID < b.frameTxn.ID
+func (a *M7Frame) Compare(bC sl.Comparable) sl.Cmp {
+	if bC == nil {
+		if a == nil {
+			return sl.EQ
+		} else {
+			return sl.GT
+		}
+	} else {
+		b := bC.(*M7Frame)
+		v := a.varState.Var
+		switch {
+		case a == b:
+			return sl.EQ
+		case a == nil:
+			return sl.LT
+		case b == nil:
+			return sl.GT
+		case b.varState.Var != v:
+			return sl.EQ
+		case a.readVoteVersion[v] < b.readVoteVersion[v]:
+			return sl.LT
+		case a.readVoteVersion[v] > b.readVoteVersion[v]:
+			return sl.GT
+		default:
+			return a.frameTxn.Compare(b.frameTxn)
+		}
 	}
-}
-
-func (a *M7Frame) LessThan(b sl.Comparable) bool {
-	return a.LessThanFrame(b.(*M7Frame))
-}
-
-func (a *M7Frame) Equal(b sl.Comparable) bool {
-	bFrame, ok := b.(*M7Frame)
-	return ok && (a == bFrame || a.frameTxn.Equal(bFrame.frameTxn))
 }
 
 func (f *M7Frame) FrameEvicted() {
@@ -900,7 +902,7 @@ func (f *M7Frame) subtractClock(clock M7VersionVector) {
 
 func (f *M7Frame) AddRead(txn *M7Txn, action *p.VarAction) {
 	if action.ReadVersion != f.frameTxn.ID || f.writeVoteVersion != nil ||
-		(f.writes.Len() != 0 && f.writes.First().Key.LessThan(txn)) {
+		(f.writes.Len() != 0 && f.writes.First().Key.Compare(txn) == sl.LT) {
 		txn.Vote(nil)
 		return
 	}
@@ -908,7 +910,7 @@ func (f *M7Frame) AddRead(txn *M7Txn, action *p.VarAction) {
 	if node := f.reads.Get(txn); node == nil {
 		f.reads.Insert(txn, uncommitted)
 		f.uncommittedReads++
-		if f.maxUncommittedRead == nil || f.maxUncommittedRead.LessThan(txn) {
+		if f.maxUncommittedRead == nil || f.maxUncommittedRead.Compare(txn) == sl.LT {
 			f.maxUncommittedRead = txn
 		}
 		txn.Vote(f.readVoteVersion)
@@ -945,7 +947,7 @@ func (f *M7Frame) maybeFindMaxReadFrom(txn *M7Txn, node *sl.Node) {
 	if f.uncommittedReads == 0 {
 		f.maxUncommittedRead = nil
 		f.maybeStartWrites()
-	} else if f.maxUncommittedRead.Equal(txn) {
+	} else if f.maxUncommittedRead.Compare(txn) == sl.EQ {
 		for {
 			if node.Value == uncommitted {
 				f.maxUncommittedRead = node.Key.(*M7Txn)
@@ -990,7 +992,7 @@ func (f *M7Frame) calculateWriteVoteVersion() {
 }
 
 func (f *M7Frame) AddWrite(txn *M7Txn) {
-	if f.rwPresent || (f.maxUncommittedRead != nil && txn.LessThan(f.maxUncommittedRead)) {
+	if f.rwPresent || (f.maxUncommittedRead != nil && txn.Compare(f.maxUncommittedRead) == sl.LT) {
 		txn.Vote(nil)
 		return
 	}
@@ -1055,7 +1057,7 @@ func (f *M7Frame) WriteCompleted(txn *M7Txn) {
 
 func (f *M7Frame) AddReadWrite(txn *M7Txn, action *p.VarAction) {
 	if action.ReadVersion != f.frameTxn.ID || f.writeVoteVersion != nil ||
-		f.writes.Len() != 0 || (f.maxUncommittedRead != nil && txn.LessThan(f.maxUncommittedRead)) {
+		f.writes.Len() != 0 || (f.maxUncommittedRead != nil && txn.Compare(f.maxUncommittedRead) == sl.LT) {
 		txn.Vote(nil)
 		return
 	}
@@ -1179,26 +1181,42 @@ type M7VarState struct {
 
 type M7TxnByCommitClock M7Txn
 
-func (a *M7TxnByCommitClock) LessThan(bCmp sl.Comparable) bool {
-	b := bCmp.(*M7TxnByCommitClock)
-	switch {
-	case b == nil:
-		return false
-	case a == nil:
-		return true
-	default:
-		alt := a.commitClock.LessThan(b.commitClock)
-		blt := b.commitClock.LessThan(a.commitClock)
-		if alt == blt {
-			return a.ID < b.ID
+func (a *M7TxnByCommitClock) Compare(bC sl.Comparable) sl.Cmp {
+	if bC == nil {
+		if a == nil {
+			return sl.EQ
 		} else {
-			return alt
+			return sl.GT
+		}
+	} else {
+		b := bC.(*M7TxnByCommitClock)
+		switch {
+		case a == b:
+			return sl.EQ
+		case a == nil:
+			return sl.LT
+		case b == nil:
+			return sl.GT
+		default:
+			alt := a.commitClock.LessThan(b.commitClock)
+			blt := b.commitClock.LessThan(a.commitClock)
+			switch {
+			case alt == blt:
+				switch {
+				case a.ID < b.ID:
+					return sl.LT
+				case a.ID > b.ID:
+					return sl.GT
+				default:
+					return sl.EQ
+				}
+			case alt:
+				return sl.LT
+			default:
+				return sl.GT
+			}
 		}
 	}
-}
-
-func (a *M7TxnByCommitClock) Equal(bCmp sl.Comparable) bool {
-	return a == bCmp.(*M7TxnByCommitClock)
 }
 
 // M7Txn

@@ -103,24 +103,32 @@ func (txn *Txn) GetTxn() *Txn {
 	return txn
 }
 
-func (txn *Txn) LessThan(b sl.Comparable) bool {
-	bTxn := b.(TxnContainer)
-	if b == nil || bTxn == nil || bTxn.GetTxn() == nil {
-		return false
-	} else if txn == nil {
-		return true
+func (a *Txn) Compare(bC sl.Comparable) sl.Cmp {
+	if bC == nil {
+		if a == nil {
+			return sl.EQ
+		} else {
+			return sl.GT
+		}
 	} else {
-		return txn.ID < bTxn.GetTxn().ID
-	}
-}
-
-// deliberately only looks at ID
-func (txn *Txn) Equal(b sl.Comparable) bool {
-	bTxn := b.(TxnContainer)
-	if txn == nil {
-		return b == nil || bTxn == nil || bTxn.GetTxn() == nil
-	} else {
-		return b != nil && bTxn != nil && bTxn.GetTxn() != nil && txn.ID == bTxn.GetTxn().ID
+		b := bC.(TxnContainer)
+		switch {
+		case a == b || (b != nil && a == b.GetTxn()):
+			return sl.EQ
+		case a == nil:
+			return sl.LT
+		case b == nil || b.GetTxn() == nil:
+			return sl.GT
+		default:
+			switch bTxn := b.GetTxn(); {
+			case a.ID < bTxn.ID:
+				return sl.LT
+			case a.ID > bTxn.ID:
+				return sl.GT
+			default:
+				return sl.EQ
+			}
+		}
 	}
 }
 
@@ -143,7 +151,7 @@ func (txns Txns) Swap(i, j int)      { txns[i], txns[j] = txns[j], txns[i] }
 func (a Txns) Equal(b Txns) bool {
 	if len(a) == len(b) {
 		for idx := range a {
-			if !a[idx].Equal(b[idx]) {
+			if a[idx].Compare(b[idx]) != sl.EQ {
 				return false
 			}
 		}
@@ -224,7 +232,7 @@ func (hnA *HistoryNode) Equal(hnB *HistoryNode) bool {
 	if hnA == nil || hnB == nil {
 		return false
 	}
-	if hnA.CommittedTxn.Equal(hnB.CommittedTxn) && len(hnA.Next) == len(hnB.Next) {
+	if hnA.CommittedTxn.Compare(hnB.CommittedTxn) == sl.EQ && len(hnA.Next) == len(hnB.Next) {
 		for _, nextA := range hnA.Next {
 			found := false
 			for _, nextB := range hnB.Next {

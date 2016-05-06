@@ -2,6 +2,7 @@ package parallel
 
 import (
 	"fmt"
+	sl "github.com/msackman/skiplist"
 	//"strings"
 	p "goshawkdb.io/simulation"
 )
@@ -38,7 +39,7 @@ func (c *consumer) verifyHistoryIsSerial(state *state) (int, int, bool, error) {
 						// this varInstance was involved in this txn
 						found := false
 						for idx, item := range worklist {
-							if serialNode.CommittedTxn.Equal(item.CommittedTxn) {
+							if serialNode.CommittedTxn.Compare(item.CommittedTxn) == sl.EQ {
 								found = true
 								worklist = append(worklist[:idx], worklist[idx+1:]...)
 								reached[item] = true
@@ -167,7 +168,7 @@ func (hns historyNodes) Get(txn *p.Txn) (*p.HistoryNode, bool) {
 		return hn, found
 	}
 	for t, hn := range hns.nodes {
-		if t.Equal(txn) {
+		if t.Compare(txn) == sl.EQ {
 			return hn, true
 		}
 	}
@@ -193,7 +194,7 @@ func (hns historyNodes) Merge(hn *p.HistoryNode) {
 				// do we already have this next on the hn?
 				alreadyInNext := false
 				for _, existingNext := range existing.Next {
-					if alreadyInNext = next.CommittedTxn.Equal(existingNext.CommittedTxn); alreadyInNext {
+					if alreadyInNext = next.CommittedTxn.Compare(existingNext.CommittedTxn) == sl.EQ; alreadyInNext {
 						break
 					}
 				}
